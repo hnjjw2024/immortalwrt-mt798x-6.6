@@ -36,9 +36,23 @@ jobs:
           ./scripts/feeds install -a
 
       - name: Load verified NX30 Pro config
-        run: |
+        run: |  
           cp configs/nx30pro-nmbm.config .config
           make defconfig
+
+      - name: Validate selected config
+        run: |
+          grep -qx 'CONFIG_TARGET_mediatek=y' .config
+          grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config
+          grep -qx 'CONFIG_TARGET_mediatek_filogic_DEVICE_h3c_magic-nx30-pro-nmbm=y' .config
+          grep -qx 'CONFIG_TARGET_PROFILE="DEVICE_h3c_magic-nx30-pro-nmbm"' .config
+          grep -qx 'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' .config
+          grep -qx 'CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y' .config
+          grep -qx 'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' .config
+          grep -qx 'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' .config
+          grep -qx 'CONFIG_PACKAGE_kmod-bonding=y' .config
+          grep -qx 'CONFIG_PACKAGE_kmod-netlink-diag=y' .config
+          grep -qx 'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' .config          
 
       - name: Show selected config
         run: |
@@ -53,6 +67,7 @@ jobs:
 
       - name: Build firmware
         run: |
+          set -o pipefail
           make -j"$(nproc)" V=s 2>&1 | tee build.log
 
       - name: Show generated images
