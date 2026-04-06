@@ -5,6 +5,10 @@
 
 include $(TOPDIR)/rules.mk
 
+PKG_NAME:=luci-app-turboacc-mtk
+PKG_RELEASE:=1
+PKG_MAINTAINER:=ImmortalWrt.org
+
 PKG_LICENSE:=GPL-3.0-only
 
 LUCI_TITLE:=LuCI support for MTK HNAT
