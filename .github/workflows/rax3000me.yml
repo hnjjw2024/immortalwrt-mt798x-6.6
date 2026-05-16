@@ -1,0 +1,121 @@
+name: Build CMCC RAX3000Me Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      memory_type:
+        description: 'Memory Type (check your device!)'
+        required: true
+        default: 'ddr3'
+        type: choice
+        options:
+          - ddr3
+          - ddr4
+      storage_type:
+        description: 'Storage Type'
+        required: true
+        default: 'emmc'
+        type: choice
+        options:
+          - emmc
+          - nand
+      with_usb:
+        description: 'Enable USB support'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # 根据输入动态设置 DEVICE_PROFILE
+  DEVICE_PROFILE: ${{ format('DEVICE_cmcc_rax3000me-{0}-{1}{2}', 
+    github.event.inputs.memory_type, 
+    github.event.inputs.storage_type,
+    github.event.inputs.with_usb == 'false' && '-nousb' || '') }}
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: nx30pro-nmbm-build  # 或您需要的分支
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            gettext gcc-multilib g++-multilib git gnutls-dev gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+            libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev libssl-dev \
+            libtool libyaml-dev libz-dev lld llvm lrzsz mkisofs msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+
+      - name: Update and install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # 🔹 关键 1: 使用 RAX3000Me 专用 config
+      - name: Load RAX3000Me config
+        run: |
+          # 基础配置继承 mt7981-ax3000
+          cp defconfig/mt7981-ax3000.config .config
+          
+          # 覆盖为 RAX3000Me 设备
+          echo 'CONFIG_TARGET_mediatek=y' >> .config
+          echo 'CONFIG_TARGET_mediatek_filogic=y' >> .config
+          echo 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' >> .config
+          echo "CONFIG_TARGET_PROFILE=\"DEVICE_cmcc_rax3000me\"" >> .config
+          
+          # 根据您的硬件选择内存/存储组合 (示例: eMMC+DDR3)
+          # 实际编译时 mt7981-bl2 会自动选择对应 preloader
+          make defconfig
+
+      # 🔹 关键 2: 验证配置
+      - name: Validate config
+        run: |
+          grep -q 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config || exit 1
+          grep -q 'CONFIG_PACKAGE_kmod-mt7915e=y' .config || echo "⚠️ Wireless driver not enabled"
+          echo "✅ Config validated for cmcc_rax3000me"
+
+      - name: Show target config
+        run: |
+          echo "=== Device Profile ==="
+          grep -E '^CONFIG_TARGET_(DEVICE_|PROFILE)' .config
+          echo "=== Artifacts (preloader/uboot) ==="
+          grep -E 'CONFIG_PACKAGE_.*bl2|CONFIG_PACKAGE_.*bl31|CONFIG_PACKAGE_.*uboot' .config || true
+
+      - name: Download sources
+        run: make download -j"$(nproc)"
+
+      - name: Build firmware
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" V=s 2>&1 | tee build.log
+
+      - name: Show generated images
+        if: always()
+        run: |
+          echo "=== All filogic outputs ==="
+          find bin/targets/mediatek/filogic -type f -name "*.itb" -o -name "*.bin" 2>/dev/null | sort
+          echo "=== RAX3000Me specific ==="
+          find bin/targets/mediatek/filogic -type f | grep -i 'rax3000me' || echo "⚠️ No rax3000me files found"
+
+      - name: Upload firmware
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-rax3000me-${{ github.event.inputs.memory_type }}-${{ github.event.inputs.storage_type }}
+          path: |
+            bin/targets/mediatek/filogic/*rax3000me*
+            .config
+            build.log
+          if-no-files-found: warn
