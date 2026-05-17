@@ -98,25 +98,25 @@ jobs:
           else
             echo "❌ Config not found, creating minimal config..."
             cat > .config << 'EOF'
-CONFIG_TARGET_mediatek=y
-CONFIG_TARGET_mediatek_filogic=y
-CONFIG_LINUX_6_6=y
-CONFIG_PACKAGE_kmod-mediatek-hnat=y
-CONFIG_MTK_FAST_NAT_SUPPORT=y
-CONFIG_PACKAGE_kmod-warp=y
-CONFIG_MTK_WARP_SUPPORT=y
-CONFIG_NF_FLOW_TABLE=y
-CONFIG_NF_FLOW_TABLE_HW=y
-CONFIG_PACKAGE_kmod-ipt-offload=y
-CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-CONFIG_PACKAGE_iptables-mod-fullconenat=y
-CONFIG_PACKAGE_nftables-mod-fullconenat=y
-CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
-CONFIG_PACKAGE_mtwifi-cfg=y
-CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
-CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
-EOF
+            CONFIG_TARGET_mediatek=y
+            CONFIG_TARGET_mediatek_filogic=y
+            CONFIG_LINUX_6_6=y
+            CONFIG_PACKAGE_kmod-mediatek-hnat=y
+            CONFIG_MTK_FAST_NAT_SUPPORT=y
+            CONFIG_PACKAGE_kmod-warp=y
+            CONFIG_MTK_WARP_SUPPORT=y
+            CONFIG_NF_FLOW_TABLE=y
+            CONFIG_NF_FLOW_TABLE_HW=y
+            CONFIG_PACKAGE_kmod-ipt-offload=y
+            CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+            CONFIG_PACKAGE_iptables-mod-fullconenat=y
+            CONFIG_PACKAGE_nftables-mod-fullconenat=y
+            CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+            CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
+            CONFIG_PACKAGE_mtwifi-cfg=y
+            CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
+            CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
+            EOF
           fi
           
           make defconfig
