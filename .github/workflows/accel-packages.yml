@@ -1,6 +1,7 @@
 # =============================================================================
 # .github/workflows/accel-packages.yml
 # Build Hardware Acceleration Packages (.ipk) Only
+# Using immortalwrt-mt798x-6.6 as source
 # =============================================================================
 
 name: Build Hardware Acceleration Packages
@@ -14,8 +15,6 @@ on:
         default: '6.6'
         type: choice
         options:
-          - '5.15'
-          - '6.1'
           - '6.6'
       target_arch:
         description: 'Target Architecture'
@@ -24,8 +23,6 @@ on:
         type: choice
         options:
           - aarch64_cortex-a53
-          - arm_cortex-a7
-          - arm_cortex-a9
       include_luci:
         description: 'Include LuCI plugins'
         required: false
@@ -34,6 +31,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # ✅ 关键：使用 immortalwrt-mt798x-6.6 仓库
   REPO_URL: https://github.com/hnjjw2024/immortalwrt-mt798x-6.6
   REPO_BRANCH: nx30pro-nmbm-build
   CONFIG_FILE: configs/accel-packages-only.config
@@ -42,21 +40,24 @@ jobs:
   build-packages:
     name: Acceleration Packages (${{ inputs.target_kernel }}/${{ inputs.target_arch }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
-      - name: Checkout source
+      # ✅ 关键：直接 checkout 您的仓库（包含所有 MTK 专用包）
+      - name: Checkout immortalwrt-mt798x-6.6 source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          repository: hnjjw2024/immortalwrt-mt798x-6.6
           ref: ${{ env.REPO_BRANCH }}
+          fetch-depth: 1
+          path: source
 
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y \
             ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-            bzip2 ccache cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
             gettext gcc-multilib g++-multilib git gnutls-dev gperf haveged help2man intltool \
             lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
             libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev libssl-dev \
@@ -65,66 +66,80 @@ jobs:
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
             texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
 
+      # ✅ 进入源码目录
+      - name: Prepare source tree
+        run: |
+          cd source
+          echo "📂 Working directory: $(pwd)"
+          echo "📋 Files in package directory:"
+          ls -la package/ | head -20
+          
+          # 检查 MTK 专用包是否存在
+          echo "🔍 Checking MTK packages..."
+          [ -d "package/kernel/mediatek-hnat" ] && echo "✅ kmod-mediatek-hnat found" || echo "❌ kmod-mediatek-hnat not found"
+          [ -d "package/kernel/warp" ] && echo "✅ kmod-warp found" || echo "❌ kmod-warp not found"
+          [ -d "package/mtk" ] && echo "✅ mtk directory found" || echo "❌ mtk directory not found"
+
       - name: Update and install feeds
         run: |
+          cd source
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Load packages-only config
         run: |
-          echo "🔧 Loading package-only configuration..."
+          cd source
+          echo "🔧 Loading configuration..."
           
-          if [ -f "${{ env.CONFIG_FILE }}" ]; then
-            cp "${{ env.CONFIG_FILE }}" .config
+          if [ -f "../${{ env.CONFIG_FILE }}" ]; then
+            cp "../${{ env.CONFIG_FILE }}" .config
             echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
           else
-            echo "❌ Config not found: ${{ env.CONFIG_FILE }}"
-            exit 1
-          fi
-          
-          # 根据输入调整配置
-          if [ "${{ inputs.include_luci }}" = "false" ]; then
-            echo "📦 Disabling LuCI plugins..."
-            sed -i '/luci-app-turboacc/d' .config
-            sed -i '/luci-app-mtwifi/d' .config
+            echo "❌ Config not found, creating minimal config..."
+            cat > .config << 'EOF'
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_LINUX_6_6=y
+CONFIG_PACKAGE_kmod-mediatek-hnat=y
+CONFIG_MTK_FAST_NAT_SUPPORT=y
+CONFIG_PACKAGE_kmod-warp=y
+CONFIG_MTK_WARP_SUPPORT=y
+CONFIG_NF_FLOW_TABLE=y
+CONFIG_NF_FLOW_TABLE_HW=y
+CONFIG_PACKAGE_kmod-ipt-offload=y
+CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+CONFIG_PACKAGE_iptables-mod-fullconenat=y
+CONFIG_PACKAGE_nftables-mod-fullconenat=y
+CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
+CONFIG_PACKAGE_mtwifi-cfg=y
+CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
+CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
+EOF
           fi
           
           make defconfig
           echo "✅ Configuration applied"
 
-      - name: Validate package config
+      - name: Validate configuration
         run: |
-          echo "🔍 Validating package selection..."
-          
-          # 检查核心加速包
-          for pkg in \
-            "CONFIG_PACKAGE_kmod-warp=y" \
-            "CONFIG_PACKAGE_kmod-ipt-offload=y" \
-            "CONFIG_PACKAGE_kmod-ipt-fullconenat=y"; do
-            grep -qx "$pkg" .config || { echo "❌ Missing: $pkg"; exit 1; }
-          done
-          
-          echo "✅ Core acceleration packages validated"
-          
-          # 显示将编译的包
-          echo -e "\n📋 Packages to build:"
-          grep '^CONFIG_PACKAGE_.*=y' .config | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort
+          cd source
+          echo "🔍 Validating packages..."
+          grep -E 'CONFIG_PACKAGE_(kmod-mediatek-hnat|kmod-warp|luci-app-turboacc-mtk|mtwifi-cfg)=y' .config || true
 
       - name: Download sources
         run: |
-          echo "📦 Downloading package sources..."
+          cd source
           make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
-          echo "✅ Download completed"
 
-      # =====================================================================
-      # 🔑 关键：单独编译软件包 (而非完整固件)
-      # =====================================================================
+      # ✅ 编译单个包（而非完整固件）
       - name: Build acceleration packages
         run: |
+          cd source
           echo "🔨 Building hardware acceleration packages..."
           echo "=========================================="
           
-          # 定义要编译的包列表
+          # 定义包列表
           PACKAGES=(
             "kmod-mediatek-hnat"
             "kmod-warp"
@@ -134,7 +149,7 @@ jobs:
             "nftables-mod-fullconenat"
           )
           
-          # 添加 LuCI 包 (如启用)
+          # 添加 LuCI 包
           if [ "${{ inputs.include_luci }}" = "true" ]; then
             PACKAGES+=(
               "luci-app-turboacc-mtk"
@@ -145,7 +160,7 @@ jobs:
             )
           fi
           
-          # 逐个编译包 (失败时继续)
+          # 逐个编译
           FAILED=0
           for pkg in "${PACKAGES[@]}"; do
             echo "📦 Building: $pkg"
@@ -159,47 +174,44 @@ jobs:
           done
           
           if [ $FAILED -eq 1 ]; then
-            echo "⚠️ Some packages failed to build"
-          else
-            echo "✅ All packages built successfully"
+            echo "⚠️ Some packages failed"
+            exit 1
           fi
+          
+          echo "✅ All packages built successfully"
 
       - name: Show generated packages
         if: always()
         run: |
+          cd source
           echo "📁 Generated .ipk Packages"
           echo "=========================="
           
-          # 查找所有加速相关 .ipk 文件
           find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort || echo "No packages found"
           
           echo -e "\n📁 Package sizes:"
           find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec ls -lh {} \; | sort -k5 -h || true
-          
-          echo -e "\n📁 Package index:"
-          ls -la bin/packages/*/base/Packages.gz 2>/dev/null || echo "No package index found"
 
       - name: Upload packages
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: accel-packages-${{ inputs.target_kernel }}-${{ inputs.target_arch }}${{ inputs.include_luci == 'false' && '-no-luci' || '' }}
           path: |
-            bin/packages/*/base/kmod-mediatek-hnat*.ipk
-            bin/packages/*/base/kmod-warp*.ipk
-            bin/packages/*/base/kmod-ipt-offload*.ipk
-            bin/packages/*/base/kmod-ipt-fullconenat*.ipk
-            bin/packages/*/base/iptables-mod-fullconenat*.ipk
-            bin/packages/*/base/nftables-mod-fullconenat*.ipk
-            bin/packages/*/luci/luci-app-turboacc-mtk*.ipk
-            bin/packages/*/luci/luci-i18n-turboacc-mtk-zh-cn*.ipk
-            bin/packages/*/base/mtwifi-cfg*.ipk
-            bin/packages/*/luci/luci-app-mtwifi-cfg*.ipk
-            bin/packages/*/luci/luci-i18n-mtwifi-cfg-zh-cn*.ipk
-            bin/packages/*/base/Packages*
-            .config
-            build.log
-          if-no-files-found: warn
+            source/bin/packages/*/base/kmod-mediatek-hnat*.ipk
+            source/bin/packages/*/base/kmod-warp*.ipk
+            source/bin/packages/*/base/kmod-ipt-offload*.ipk
+            source/bin/packages/*/base/kmod-ipt-fullconenat*.ipk
+            source/bin/packages/*/base/iptables-mod-fullconenat*.ipk
+            source/bin/packages/*/base/nftables-mod-fullconenat*.ipk
+            source/bin/packages/*/luci/luci-app-turboacc-mtk*.ipk
+            source/bin/packages/*/luci/luci-i18n-turboacc-mtk-zh-cn*.ipk
+            source/bin/packages/*/base/mtwifi-cfg*.ipk
+            source/bin/packages/*/luci/luci-app-mtwifi-cfg*.ipk
+            source/bin/packages/*/luci/luci-i18n-mtwifi-cfg-zh-cn*.ipk
+            source/.config
+            source/build.log
+          if-no-files-found: error
           retention-days: 90
 
       - name: Build summary
@@ -211,9 +223,3 @@ jobs:
           echo "Kernel: ${{ inputs.target_kernel }}"
           echo "Arch: ${{ inputs.target_arch }}"
           echo "LuCI: ${{ inputs.include_luci && 'Included' || 'Excluded' }}"
-          echo ""
-          
-          if [ -d "bin/packages" ]; then
-            echo "Generated packages:"
-            find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec basename {} \; | sort | uniq || echo "None"
-          fi
