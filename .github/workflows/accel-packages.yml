@@ -1,7 +1,7 @@
 # =============================================================================
 # .github/workflows/accel-packages.yml
-# Build Hardware Acceleration Packages (.ipk) Only
-# Using immortalwrt-mt798x-6.6 as source
+# Build Hardware Acceleration Packages (.ipk)
+# Fixed: Toolchain dependencies, host tools, and YAML syntax
 # =============================================================================
 
 name: Build Hardware Acceleration Packages
@@ -23,11 +23,6 @@ on:
         type: choice
         options:
           - aarch64_cortex-a53
-      include_luci:
-        description: 'Include LuCI plugins'
-        required: false
-        default: true
-        type: boolean
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -36,13 +31,13 @@ env:
   CONFIG_FILE: configs/accel-packages-only.config
 
 jobs:
-  build-packages:
-    name: Acceleration Packages (${{ inputs.target_kernel }}/${{ inputs.target_arch }})
+  build:
+    name: Accel Packages (${{ inputs.target_kernel }}/${{ inputs.target_arch }})
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
-      - name: Checkout immortalwrt-mt798x-6.6 source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           repository: hnjjw2024/immortalwrt-mt798x-6.6
@@ -50,44 +45,29 @@ jobs:
           fetch-depth: 1
           path: source
 
+      # ✅ 修复 1：补充缺失的宿主机工具 (修复 libdeflate-gzip 报错)
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y \
             ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
             bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
-            gettext gcc-multilib g++-multilib git gnutls-dev gperf haveged help2man intltool \
+            gettext gcc-multilib g++-multilib git gperf haveged help2man intltool \
             lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
             libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev libssl-dev \
-            libtool libyaml-dev libz-dev lld llvm lrzsz mkisofs msmtp nano ninja-build \
-            p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            libtool libyaml-dev libz-dev libdeflate-dev zstd liblz4-tool \
+            lld llvm lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
+            pkgconf python3 python3-pip python3-ply python3-docutils python3-setuptools \
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
-            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
-
-      - name: Prepare source tree
-        run: |
-          cd source
-          echo "📂 Working directory: $(pwd)"
-          echo "📋 Checking package directories..."
-          ls -la package/ | head -20
-          
-          echo "🔍 Checking MTK packages..."
-          [ -d "package/kernel/mediatek-hnat" ] && echo "✅ kmod-mediatek-hnat found" || echo "❌ kmod-mediatek-hnat not found"
-          [ -d "package/kernel/warp" ] && echo "✅ kmod-warp found" || echo "❌ kmod-warp not found"
-          [ -d "package/mtk" ] && echo "✅ mtk directory found" || echo "❌ mtk directory not found"
-          
-          echo "📋 Checking feeds..."
-          cat feeds.conf.default 2>/dev/null || echo "No feeds.conf.default found"
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
       - name: Update and install feeds
         run: |
           cd source
-          echo "🔄 Updating feeds..."
           ./scripts/feeds update -a
-          echo "📦 Installing all feeds..."
           ./scripts/feeds install -a
 
-      - name: Load packages-only config
+      - name: Load configuration
         run: |
           cd source
           echo "🔧 Loading configuration..."
@@ -97,59 +77,43 @@ jobs:
             echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
           else
             echo "❌ Config not found, creating minimal config..."
-            cat > .config << 'EOF'
+            cat > .config << 'ENDOFCONFIG'
             CONFIG_TARGET_mediatek=y
             CONFIG_TARGET_mediatek_filogic=y
-            CONFIG_LINUX_6_6=y
-            CONFIG_PACKAGE_kmod-mediatek-hnat=y
-            CONFIG_MTK_FAST_NAT_SUPPORT=y
-            CONFIG_PACKAGE_kmod-warp=y
-            CONFIG_MTK_WARP_SUPPORT=y
-            CONFIG_NF_FLOW_TABLE=y
-            CONFIG_NF_FLOW_TABLE_HW=y
-            CONFIG_PACKAGE_kmod-ipt-offload=y
-            CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-            CONFIG_PACKAGE_iptables-mod-fullconenat=y
-            CONFIG_PACKAGE_nftables-mod-fullconenat=y
-            CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-            CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
-            CONFIG_PACKAGE_mtwifi-cfg=y
             CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
             CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
-            EOF
+            CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+            CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
+            CONFIG_PACKAGE_kmod-bonding=y
+            CONFIG_PACKAGE_kmod-netlink-diag=y
+            CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+            ENDOFCONFIG
           fi
           
           make defconfig
           echo "✅ Configuration applied"
-
-      - name: Validate configuration
-        run: |
-          cd source
-          echo "🔍 Validating packages..."
-          grep -E 'CONFIG_PACKAGE_(kmod-mediatek-hnat|kmod-warp|luci-app-turboacc-mtk|mtwifi-cfg)=y' .config || true
 
       - name: Download sources
         run: |
           cd source
           make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
 
-      # 🔑 关键：编译完整固件以生成所有包
-      # 单独编译包会失败，因为依赖关系复杂
-      - name: Build complete firmware (to generate packages)
+      # ✅ 修复 2：改为完整编译。OpenWrt 必须先生成 toolchain 和 kernel headers 才能打包 .ipk
+      - name: Build firmware & packages
         run: |
           cd source
-          echo "🔨 Building complete firmware (this generates all packages)..."
-          echo "=========================================="
-          echo "This will take 2-3 hours..."
+          echo "🔨 Building complete firmware (required for .ipk generation)..."
+          echo "⏱️ Estimated time: 60-90 minutes on GitHub Actions"
           
-          # 编译完整固件（这会生成所有 .ipk 包）
-          make -j"$(nproc)" V=s 2>&1 | tee build.log || {
-            echo "⚠️ Full build failed, trying package-only build..."
-            # 如果完整编译失败，尝试只编译包
-            make package/install -j"$(nproc)" V=s 2>&1 | tee -a build.log
-          }
+          # 使用完整编译确保 toolchain 和依赖完整生成
+          make -j"$(nproc)" V=s 2>&1 | tee build.log
           
-          echo "✅ Build completed"
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✅ Build completed successfully!"
+          else
+            echo "❌ Build failed. Check build.log for details."
+            exit 1
+          fi
 
       - name: Show generated packages
         if: always()
@@ -157,24 +121,13 @@ jobs:
           cd source
           echo "📁 Generated .ipk Packages"
           echo "=========================="
-          
-          # 查找所有加速相关 .ipk 文件
-          find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort || echo "No acceleration packages found"
-          
-          echo -e "\n📁 Package sizes:"
-          find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec ls -lh {} \; | sort -k5 -h || true
-          
-          echo -e "\n📁 All packages in base:"
-          ls -lh bin/packages/*/base/*.ipk 2>/dev/null | head -20 || echo "No base packages"
-          
-          echo -e "\n📁 All packages in luci:"
-          ls -lh bin/packages/*/luci/*.ipk 2>/dev/null | head -20 || echo "No luci packages"
+          find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort || echo "No packages found"
 
       - name: Upload packages
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: accel-packages-${{ inputs.target_kernel }}-${{ inputs.target_arch }}${{ inputs.include_luci == 'false' && '-no-luci' || '' }}
+          name: accel-packages-${{ inputs.target_kernel }}-${{ inputs.target_arch }}
           path: |
             source/bin/packages/*/base/kmod-mediatek-hnat*.ipk
             source/bin/packages/*/base/kmod-warp*.ipk
@@ -187,7 +140,6 @@ jobs:
             source/bin/packages/*/luci/luci-i18n-turboacc-mtk-zh-cn*.ipk
             source/bin/packages/*/luci/luci-app-mtwifi-cfg*.ipk
             source/bin/packages/*/luci/luci-i18n-mtwifi-cfg-zh-cn*.ipk
-            source/bin/packages/*/base/Packages*
             source/.config
             source/build.log
           if-no-files-found: warn
@@ -201,10 +153,3 @@ jobs:
           echo "Status: ${{ job.status }}"
           echo "Kernel: ${{ inputs.target_kernel }}"
           echo "Arch: ${{ inputs.target_arch }}"
-          echo "LuCI: ${{ inputs.include_luci && 'Included' || 'Excluded' }}"
-          echo ""
-          
-          if [ -d "source/bin/packages" ]; then
-            echo "Generated acceleration packages:"
-            find source/bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec basename {} \; | sort | uniq || echo "None"
-          fi
