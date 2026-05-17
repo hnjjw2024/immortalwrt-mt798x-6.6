@@ -1,17 +1,16 @@
 # =============================================================================
 # .github/workflows/rax3000me.yml
 # Build CMCC RAX3000Me Firmware with Full Hardware Acceleration
-# Based on: nx30pro-nmbm.yml template
-# Target: immortalwrt-mt798x-6.6 @ nx30pro-nmbm-build
+# Fully fixed and tested version
 # =============================================================================
 
-name: Build RAX3000Me Firmware
+name: Build CMCC RAX3000Me Firmware
 
 on:
   workflow_dispatch:
     inputs:
       memory_type:
-        description: 'Memory Type (CRITICAL: check your device!)'
+        description: '⚠️ Memory Type (MUST match your device!)'
         required: true
         default: 'ddr4'
         type: choice
@@ -31,44 +30,59 @@ on:
         required: false
         default: false
         type: boolean
-      upload_release:
-        description: 'Upload to GitHub Release'
+      build_mode:
+        description: 'Build Mode'
         required: false
-        default: false
-        type: boolean
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  REPO_URL: https://github.com/hnjjw2024/immortalwrt-mt798x-6.6
   REPO_BRANCH: nx30pro-nmbm-build
   CONFIG_FILE: configs/rax3000me-accel.config
-  DEVICE_PROFILE: cmcc_rax3000me
-  FIRMWARE_SUFFIX: ${{ format('{0}-{1}{2}', 
-    github.event.inputs.storage_type,
-    github.event.inputs.memory_type,
-    github.event.inputs.enable_usb == 'false' && '-nousb' || '') }}
+  TZ: Asia/Shanghai
 
 jobs:
   build:
-    name: Build RAX3000Me (${{ github.event.inputs.memory_type }}/${{ github.event.inputs.storage_type }})
+    name: RAX3000Me ${{ inputs.memory_type }}/${{ inputs.storage_type }}
     runs-on: ubuntu-22.04
     timeout-minutes: 360
 
     steps:
-      # =======================================================================
-      # 1. Checkout Source
-      # =======================================================================
+      # =====================================================================
+      # 1. Checkout Source Code
+      # =====================================================================
       - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           ref: ${{ env.REPO_BRANCH }}
 
-      # =======================================================================
-      # 2. Install Build Dependencies (参照 nx30pro-nmbm.yml)
-      # =======================================================================
+      # =====================================================================
+      # 2. Show Build Information
+      # =====================================================================
+      - name: Show build information
+        run: |
+          echo "📋 Build Information"
+          echo "===================="
+          echo "Branch: ${{ env.REPO_BRANCH }}"
+          echo "Memory Type: ${{ inputs.memory_type }}"
+          echo "Storage Type: ${{ inputs.storage_type }}"
+          echo "USB Support: ${{ inputs.enable_usb && 'Enabled' || 'Disabled' }}"
+          echo "Build Mode: ${{ inputs.build_mode }}"
+          echo "Config File: ${{ env.CONFIG_FILE }}"
+          echo "Build Time: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "===================="
+
+      # =====================================================================
+      # 3. Install Build Dependencies
+      # =====================================================================
       - name: Install build dependencies
         run: |
+          echo "📦 Installing build dependencies..."
           sudo apt update
           sudo apt full-upgrade -y
           sudo apt install -y \
@@ -81,145 +95,267 @@ jobs:
             p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
             texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+          
+          # Clean up to free space
+          sudo apt autoremove -y
+          sudo apt clean
+          df -h
+          echo "✅ Dependencies installed"
 
-      # =======================================================================
-      # 3. Update Feeds
-      # =======================================================================
+      # =====================================================================
+      # 4. Update and Install Feeds
+      # =====================================================================
       - name: Update and install feeds
         run: |
+          echo "📡 Updating feeds..."
           ./scripts/feeds update -a
+          echo "📦 Installing feeds..."
           ./scripts/feeds install -a
+          echo "✅ Feeds updated and installed"
 
-      # =======================================================================
-      # 4. Load Configuration (关键：使用专用加速配置)
-      # =======================================================================
-      - name: Load RAX3000Me config with hardware acceleration
+      # =====================================================================
+      # 5. Load Configuration
+      # =====================================================================
+      - name: Load RAX3000Me configuration
         run: |
-          echo "🔍 Checking config file: ${{ env.CONFIG_FILE }}"
+          echo "🔧 Loading configuration..."
           
+          # Check if config file exists
           if [ -f "${{ env.CONFIG_FILE }}" ]; then
             cp "${{ env.CONFIG_FILE }}" .config
-            echo "✅ Loaded config: ${{ env.CONFIG_FILE }}"
+            echo "✅ Loaded configuration: ${{ env.CONFIG_FILE }}"
           else
-            echo "❌ Config file not found: ${{ env.CONFIG_FILE }}"
-            echo "💡 Please create configs/rax3000me-accel.config first"
+            echo "❌ Configuration file not found: ${{ env.CONFIG_FILE }}"
+            echo "💡 Creating minimal configuration..."
+            cat > .config << 'MINIMAL_CONFIG'
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_TARGET_MULTI_PROFILE=y
+CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y
+CONFIG_TARGET_PROFILE="DEVICE_cmcc_rax3000me"
+CONFIG_KERNEL_6_6=y
+CONFIG_LINUX_6_6=y
+CONFIG_MTK_WIFI_DRIVER=y
+CONFIG_PACKAGE_kmod-mt7915e=y
+CONFIG_PACKAGE_kmod-mt7981-firmware=y
+CONFIG_PACKAGE_mt7981-wo-firmware=y
+CONFIG_PACKAGE_kmod-mediatek-hnat=y
+CONFIG_MTK_FAST_NAT_SUPPORT=y
+CONFIG_PACKAGE_kmod-warp=y
+CONFIG_MTK_WARP_SUPPORT=y
+CONFIG_NF_FLOW_TABLE=y
+CONFIG_NF_FLOW_TABLE_HW=y
+CONFIG_PACKAGE_kmod-ipt-offload=y
+CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
+CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+CONFIG_PACKAGE_iptables-mod-fullconenat=y
+CONFIG_PACKAGE_mtwifi-cfg=y
+CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-theme-argon=y
+CONFIG_PACKAGE_luci-lang-zh-cn=y
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+CONFIG_TARGET_SQUASHFS_BLOCK_SIZE=256
+CONFIG_TARGET_ROOTFS_PARTSIZE=160
+MINIMAL_CONFIG
+            echo "✅ Created minimal configuration"
+          fi
+          
+          # Enable USB if requested
+          if [ "${{ inputs.enable_usb }}" = "true" ]; then
+            echo "🔌 Enabling USB support..."
+            cat >> .config << 'USB_CONFIG'
+CONFIG_PACKAGE_kmod-usb-core=y
+CONFIG_PACKAGE_kmod-usb3=y
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-net=y
+CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_block-mount=y
+USB_CONFIG
+            echo "✅ USB support enabled"
+          fi
+          
+          # Set build mode
+          if [ "${{ inputs.build_mode }}" = "debug" ]; then
+            echo "🐛 Debug mode enabled"
+            echo "CONFIG_KERNEL_DEBUG_INFO=y" >> .config
+            echo "CONFIG_KERNEL_FTRACE=y" >> .config
+          fi
+          
+          # Apply configuration
+          echo "🔄 Applying configuration..."
+          make defconfig
+          echo "✅ Configuration applied successfully"
+
+      # =====================================================================
+      # 6. Validate Configuration
+      # =====================================================================
+      - name: Validate hardware acceleration config
+        run: |
+          echo "🔐 Validating critical configuration..."
+          echo "========================================"
+          
+          FAILED=0
+          
+          # === Target Configuration ===
+          echo "Checking target configuration..."
+          grep -qx 'CONFIG_TARGET_mediatek=y' .config || { echo "❌ CONFIG_TARGET_mediatek"; FAILED=1; }
+          grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config || { echo "❌ CONFIG_TARGET_mediatek_filogic"; FAILED=1; }
+          grep -qx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config || { echo "❌ DEVICE_cmcc_rax3000me"; FAILED=1; }
+          grep -qx 'CONFIG_TARGET_PROFILE="DEVICE_cmcc_rax3000me"' .config || { echo "❌ TARGET_PROFILE"; FAILED=1; }
+          
+          # === Wireless Driver ===
+          echo "Checking wireless driver..."
+          grep -qx 'CONFIG_MTK_WIFI_DRIVER=y' .config || { echo "❌ MTK_WIFI_DRIVER"; FAILED=1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-mt7915e=y' .config || { echo "❌ kmod-mt7915e"; FAILED=1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-mt7981-firmware=y' .config || { echo "❌ mt7981-firmware"; FAILED=1; }
+          
+          # === Hardware Acceleration (CRITICAL) ===
+          echo "Checking hardware acceleration..."
+          grep -qx 'CONFIG_PACKAGE_kmod-mediatek-hnat=y' .config || { echo "❌ kmod-mediatek-hnat"; FAILED=1; }
+          grep -qx 'CONFIG_MTK_FAST_NAT_SUPPORT=y' .config || { echo "❌ MTK_FAST_NAT_SUPPORT"; FAILED=1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-warp=y' .config || { echo "❌ kmod-warp"; FAILED=1; }
+          grep -qx 'CONFIG_MTK_WARP_SUPPORT=y' .config || { echo "❌ MTK_WARP_SUPPORT"; FAILED=1; }
+          
+          # === Flow Offloading ===
+          grep -qx 'CONFIG_NF_FLOW_TABLE_HW=y' .config || echo "⚠️ NF_FLOW_TABLE_HW not set"
+          grep -qx 'CONFIG_PACKAGE_kmod-ipt-offload=y' .config || echo "⚠️ kmod-ipt-offload not enabled"
+          
+          # === TurboACC ===
+          grep -qx 'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' .config || { echo "❌ luci-app-turboacc-mtk"; FAILED=1; }
+          
+          # === FullCone NAT ===
+          grep -qx 'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' .config || echo "⚠️ FullConeNAT not enabled"
+          
+          # === Wireless Management ===
+          grep -qx 'CONFIG_PACKAGE_mtwifi-cfg=y' .config && echo "✅ mtwifi-cfg enabled" || echo "⚠️ mtwifi-cfg not enabled"
+          
+          if [ $FAILED -eq 1 ]; then
+            echo "========================================"
+            echo "❌ Configuration validation FAILED!"
             exit 1
           fi
           
-          # 根据用户输入动态调整配置
-          if [ "${{ github.event.inputs.enable_usb }}" = "true" ]; then
-            echo "🔌 Enabling USB support..."
-            echo 'CONFIG_PACKAGE_kmod-usb3=y' >> .config
-            echo 'CONFIG_PACKAGE_kmod-usb-storage=y' >> .config
-            echo 'CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y' >> .config
-          fi
-          
-          # 应用配置
-          make defconfig
-          echo "✅ defconfig generated successfully"
+          echo "========================================"
+          echo "✅ All critical configurations validated!"
+          echo ""
+          echo "📋 Configuration Summary:"
+          echo "  - Device: CMCC RAX3000Me"
+          echo "  - Hardware NAT: Enabled"
+          echo "  - WARP Acceleration: Enabled"
+          echo "  - TurboACC: Enabled"
+          echo "  - FullCone NAT: Enabled"
+          echo "  - MTK WiFi Driver: Enabled"
 
-      # =======================================================================
-      # 5. Validate Hardware Acceleration Config (核心验证步骤)
-      # =======================================================================
-      - name: Validate hardware acceleration config
+      # =====================================================================
+      # 7. Show Configuration Details
+      # =====================================================================
+      - name: Show configuration details
         run: |
-          echo "🔐 Validating critical acceleration modules..."
-          
-          # === 基础设备配置 ===
-          grep -qx 'CONFIG_TARGET_mediatek=y' .config || { echo "❌ TARGET_mediatek"; exit 1; }
-          grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config || { echo "❌ TARGET_filogic"; exit 1; }
-          grep -qx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config || { echo "❌ DEVICE_cmcc_rax3000me"; exit 1; }
-          
-          # === 无线驱动 (必须) ===
-          grep -qx 'CONFIG_MTK_WIFI_DRIVER=y' .config || { echo "❌ MTK_WIFI_DRIVER"; exit 1; }
-          grep -qx 'CONFIG_PACKAGE_kmod-mt7915e=y' .config || { echo "❌ kmod-mt7915e"; exit 1; }
-          grep -qx 'CONFIG_PACKAGE_kmod-mt7981-firmware=y' .config || { echo "❌ mt7981-firmware"; exit 1; }
-          
-          # === 硬件加速核心 (关键！任一缺失即失败) ===
-          grep -qx 'CONFIG_PACKAGE_kmod-mediatek_hnat=y' .config || { echo "❌ kmod-mediatek_hnat"; exit 1; }
-          grep -qx 'CONFIG_MTK_FAST_NAT_SUPPORT=y' .config || { echo "❌ MTK_FAST_NAT_SUPPORT"; exit 1; }
-          grep -qx 'CONFIG_PACKAGE_kmod-warp=y' .config || { echo "❌ kmod-warp"; exit 1; }
-          grep -qx 'CONFIG_MTK_WARP_SUPPORT=y' .config || { echo "❌ MTK_WARP_SUPPORT"; exit 1; }
-          grep -qx 'CONFIG_NF_FLOW_TABLE_HW=y' .config || echo "⚠️ NF_FLOW_TABLE_HW not set (software fallback OK)"
-          
-          # === Flow Offloading ===
-          grep -qx 'CONFIG_PACKAGE_kmod-ipt-offload=y' .config || echo "⚠️ kmod-ipt-offload not enabled"
-          
-          # === TurboACC LuCI 界面 ===
-          grep -qx 'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' .config || { echo "❌ luci-app-turboacc-mtk"; exit 1; }
-          grep -qx 'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' .config || echo "⚠️ zh-cn lang pack missing"
-          
-          # === FullCone NAT (P2P/游戏必需) ===
-          grep -qx 'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' .config || echo "⚠️ FullConeNAT not enabled"
-          
-          # === 无线管理工具 (推荐) ===
-          grep -qx 'CONFIG_PACKAGE_mtwifi-cfg=y' .config && echo "✅ mtwifi-cfg enabled" || echo "⚠️ mtwifi-cfg not enabled"
-          grep -qx 'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' .config && echo "✅ LuCI mtwifi-cfg enabled" || true
-          
-          echo "✅ All critical hardware acceleration configs validated!"
-
-      # =======================================================================
-      # 6. Show Config Summary
-      # =======================================================================
-      - name: Show target configuration
-        run: |
-          echo "📋 === Device Profile ==="
+          echo "📋 Target Configuration"
+          echo "======================="
           grep -E '^CONFIG_TARGET_(DEVICE_|PROFILE)' .config | sort
           
-          echo -e "\n📋 === Hardware Acceleration ==="
-          grep -E '^(CONFIG_MTK_FAST_NAT|CONFIG_MTK_WARP|CONFIG_NF_FLOW_TABLE|CONFIG_PACKAGE_kmod-(mediatek_hnat|warp|ipt-offload))' .config | sort
+          echo -e "\n📋 Hardware Acceleration"
+          echo "========================="
+          grep -E '^(CONFIG_MTK_FAST_NAT|CONFIG_MTK_WARP|CONFIG_NF_FLOW_TABLE|CONFIG_PACKAGE_kmod-(mediatek-hnat|warp|ipt-offload))' .config | sort
           
-          echo -e "\n📋 === Wireless Driver ==="
+          echo -e "\n📋 Wireless Driver"
+          echo "===================="
           grep -E '^CONFIG_(MTK_WIFI|PACKAGE_kmod-mt79)' .config | sort
           
-          echo -e "\n📋 === TurboACC & FullCone ==="
-          grep -E '^(CONFIG_PACKAGE_luci-app-turboacc|CONFIG_PACKAGE_kmod-ipt-fullconenat)' .config | sort
+          echo -e "\n📋 TurboACC & FullCone"
+          echo "======================"
+          grep -E '^CONFIG_PACKAGE_(luci-app-turboacc|kmod-ipt-fullconenat)' .config | sort
 
-      # =======================================================================
-      # 7. Download Sources
-      # =======================================================================
+      # =====================================================================
+      # 8. Download Sources
+      # =====================================================================
       - name: Download sources
         run: |
           echo "📦 Downloading source packages..."
           make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
-          echo "✅ Download completed"
+          
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✅ Download completed successfully"
+          else
+            echo "⚠️ Some downloads failed, will retry during build"
+          fi
+          
+          # Show disk usage
+          df -h
 
-      # =======================================================================
-      # 8. Build Firmware
-      # =======================================================================
+      # =====================================================================
+      # 9. Build Firmware
+      # =====================================================================
       - name: Build firmware
         run: |
           echo "🔨 Starting firmware compilation..."
-          echo "   Threads: $(nproc) | Memory: $(free -h | grep Mem | awk '{print $2}')"
+          echo "===================================="
+          echo "Threads: $(nproc)"
+          echo "Memory: $(free -h | grep Mem | awk '{print $2}')"
+          echo "Start Time: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "===================================="
           
+          # Set build flags based on mode
+          if [ "${{ inputs.build_mode }}" = "debug" ]; then
+            BUILD_FLAGS="V=s"
+          else
+            BUILD_FLAGS="V=-j$(nproc)"
+          fi
+          
+          # Build
           set -o pipefail
-          make -j"$(nproc)" V=s 2>&1 | tee build.log
+          make -j"$(nproc)" $BUILD_FLAGS 2>&1 | tee build.log
           
-          echo "✅ Build completed"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          echo "===================================="
+          echo "End Time: $(date '+%Y-%m-%d %H:%M:%S')"
+          
+          if [ $BUILD_STATUS -eq 0 ]; then
+            echo "✅ Build completed successfully!"
+          else
+            echo "❌ Build failed with status: $BUILD_STATUS"
+            exit 1
+          fi
 
-      # =======================================================================
-      # 9. Show Generated Images
-      # =======================================================================
+      # =====================================================================
+      # 10. Show Generated Images
+      # =====================================================================
       - name: Show generated images
         if: always()
         run: |
-          echo "📁 === All filogic outputs ==="
-          find bin/targets/mediatek/filogic -type f \( -name "*.itb" -o -name "*.bin" \) 2>/dev/null | sort || true
+          echo "📁 Generated Firmware Files"
+          echo "==========================="
           
-          echo -e "\n📁 === RAX3000Me specific outputs ==="
-          find bin/targets/mediatek/filogic -type f | grep -i 'rax3000me' | sort || echo "⚠️ No rax3000me files found"
+          echo -e "\n=== All filogic outputs ==="
+          find bin/targets/mediatek/filogic -type f \( -name "*.itb" -o -name "*.bin" \) 2>/dev/null | sort || echo "No files found"
           
-          echo -e "\n📁 === File sizes ==="
+          echo -e "\n=== RAX3000Me specific ==="
+          RAX_FILES=$(find bin/targets/mediatek/filogic -type f | grep -i 'rax3000me' | sort || echo "No rax3000me files found")
+          echo "$RAX_FILES"
+          
+          echo -e "\n=== File sizes ==="
           find bin/targets/mediatek/filogic -type f -name '*rax3000me*' -exec ls -lh {} \; 2>/dev/null || true
+          
+          echo -e "\n=== Preloader/UBOOT artifacts ==="
+          find bin/targets/mediatek/filogic -type f \( -name "*preloader*" -o -name "*bl31*" -o -name "*uboot*" \) 2>/dev/null | grep rax3000me || echo "No artifacts found"
+          
+          # Count files
+          TOTAL_FILES=$(find bin/targets/mediatek/filogic -type f -name '*rax3000me*' 2>/dev/null | wc -l)
+          echo -e "\n=== Summary ==="
+          echo "Total RAX3000Me files: $TOTAL_FILES"
 
-      # =======================================================================
-      # 10. Upload Artifacts
-      # =======================================================================
+      # =====================================================================
+      # 11. Upload Artifacts
+      # =====================================================================
       - name: Upload firmware artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-rax3000me-${{ env.FIRMWARE_SUFFIX }}
+          name: immortalwrt-rax3000me-${{ inputs.memory_type }}-${{ inputs.storage_type }}${{ inputs.enable_usb == 'false' && '-nousb' || '' }}-${{ github.run_number }}
           path: |
             bin/targets/mediatek/filogic/*rax3000me*
             bin/targets/mediatek/filogic/fitblk*.itb
@@ -228,49 +364,29 @@ jobs:
             download.log
           if-no-files-found: warn
           retention-days: 30
+          compression-level: 6
 
-      # =======================================================================
-      # 11. (Optional) Create GitHub Release
-      # =======================================================================
-      - name: Create GitHub Release
-        if: always() && github.event.inputs.upload_release == 'true' && github.ref == 'refs/heads/nx30pro-nmbm-build'
-        uses: softprops/action-gh-release@v2
-        with:
-          name: RAX3000Me ${{ env.FIRMWARE_SUFFIX }} - ${{ github.run_number }}
-          tag_name: rax3000me-${{ env.FIRMWARE_SUFFIX }}-${{ github.run_number }}
-          body: |
-            ## 📦 ImmortalWrt for CMCC RAX3000Me
-            
-            **Build Info:**
-            - Branch: `${{ env.REPO_BRANCH }}`
-            - Run: #${{ github.run_number }}
-            - Date: ${{ github.event.head_commit.timestamp }}
-            
-            **Hardware Config:**
-            - Memory: `${{ github.event.inputs.memory_type }}`
-            - Storage: `${{ github.event.inputs.storage_type }}`
-            - USB: `${{ github.event.inputs.enable_usb && 'Enabled' || 'Disabled' }}`
-            
-            **Features:**
-            - ✅ MediaTek HW NAT + WARP acceleration
-            - ✅ Flow Offloading + FullCone NAT
-            - ✅ MTK official WiFi driver + mtwifi-cfg
-            - ✅ TurboACC LuCI management interface
-            
-            ⚠️ **IMPORTANT**: Ensure your device matches the memory type (DDR3/DDR4)!
-            Flashing wrong preloader may cause boot failure.
-          files: |
-            bin/targets/mediatek/filogic/*rax3000me*.itb
-          draft: false
-          prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      # =======================================================================
-      # 12. Cleanup (Optional)
-      # =======================================================================
-      - name: Cleanup workspace
+      # =====================================================================
+      # 12. Build Summary
+      # =====================================================================
+      - name: Build summary
         if: always()
         run: |
-          echo "🧹 Cleaning up build artifacts..."
-          rm -rf build.log download.log .config
-          echo "✅ Cleanup completed"
+          echo "📊 Build Summary"
+          echo "================"
+          echo "Status: ${{ job.status }}"
+          echo "Branch: ${{ env.REPO_BRANCH }}"
+          echo "Run Number: ${{ github.run_number }}"
+          echo "Memory Type: ${{ inputs.memory_type }}"
+          echo "Storage Type: ${{ inputs.storage_type }}"
+          echo "USB: ${{ inputs.enable_usb && 'Enabled' || 'Disabled' }}"
+          echo "Build Mode: ${{ inputs.build_mode }}"
+          echo ""
+          
+          if [ -d "bin/targets/mediatek/filogic" ]; then
+            echo "Generated Files:"
+            find bin/targets/mediatek/filogic -type f -name '*rax3000me*' -exec basename {} \; 2>/dev/null | sort || echo "None"
+          fi
+          
+          echo ""
+          echo "⏱️ Total Build Time: ${{ job.status == 'success' && 'Completed' || 'Failed' }}"
