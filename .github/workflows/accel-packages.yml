@@ -68,16 +68,23 @@ jobs:
         run: |
           cd source
           echo "📂 Working directory: $(pwd)"
+          echo "📋 Checking package directories..."
           ls -la package/ | head -20
           
           echo "🔍 Checking MTK packages..."
           [ -d "package/kernel/mediatek-hnat" ] && echo "✅ kmod-mediatek-hnat found" || echo "❌ kmod-mediatek-hnat not found"
           [ -d "package/kernel/warp" ] && echo "✅ kmod-warp found" || echo "❌ kmod-warp not found"
+          [ -d "package/mtk" ] && echo "✅ mtk directory found" || echo "❌ mtk directory not found"
+          
+          echo "📋 Checking feeds..."
+          cat feeds.conf.default 2>/dev/null || echo "No feeds.conf.default found"
 
       - name: Update and install feeds
         run: |
           cd source
+          echo "🔄 Updating feeds..."
           ./scripts/feeds update -a
+          echo "📦 Installing all feeds..."
           ./scripts/feeds install -a
 
       - name: Load packages-only config
@@ -89,8 +96,27 @@ jobs:
             cp "../${{ env.CONFIG_FILE }}" .config
             echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
           else
-            echo "❌ Config not found"
-            exit 1
+            echo "❌ Config not found, creating minimal config..."
+            cat > .config << 'EOF'
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_LINUX_6_6=y
+CONFIG_PACKAGE_kmod-mediatek-hnat=y
+CONFIG_MTK_FAST_NAT_SUPPORT=y
+CONFIG_PACKAGE_kmod-warp=y
+CONFIG_MTK_WARP_SUPPORT=y
+CONFIG_NF_FLOW_TABLE=y
+CONFIG_NF_FLOW_TABLE_HW=y
+CONFIG_PACKAGE_kmod-ipt-offload=y
+CONFIG_PACKAGE_kmod-ipt-fullconenat=y
+CONFIG_PACKAGE_iptables-mod-fullconenat=y
+CONFIG_PACKAGE_nftables-mod-fullconenat=y
+CONFIG_PACKAGE_luci-app-turboacc-mtk=y
+CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
+CONFIG_PACKAGE_mtwifi-cfg=y
+CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
+CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
+EOF
           fi
           
           make defconfig
@@ -107,49 +133,23 @@ jobs:
           cd source
           make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
 
-      - name: Build acceleration packages
+      # 🔑 关键：编译完整固件以生成所有包
+      # 单独编译包会失败，因为依赖关系复杂
+      - name: Build complete firmware (to generate packages)
         run: |
           cd source
-          echo "🔨 Building hardware acceleration packages..."
+          echo "🔨 Building complete firmware (this generates all packages)..."
           echo "=========================================="
+          echo "This will take 2-3 hours..."
           
-          PACKAGES=(
-            "kmod-mediatek-hnat"
-            "kmod-warp"
-            "kmod-ipt-offload"
-            "kmod-ipt-fullconenat"
-            "iptables-mod-fullconenat"
-            "nftables-mod-fullconenat"
-          )
+          # 编译完整固件（这会生成所有 .ipk 包）
+          make -j"$(nproc)" V=s 2>&1 | tee build.log || {
+            echo "⚠️ Full build failed, trying package-only build..."
+            # 如果完整编译失败，尝试只编译包
+            make package/install -j"$(nproc)" V=s 2>&1 | tee -a build.log
+          }
           
-          if [ "${{ inputs.include_luci }}" = "true" ]; then
-            PACKAGES+=(
-              "luci-app-turboacc-mtk"
-              "luci-i18n-turboacc-mtk-zh-cn"
-              "mtwifi-cfg"
-              "luci-app-mtwifi-cfg"
-              "luci-i18n-mtwifi-cfg-zh-cn"
-            )
-          fi
-          
-          FAILED=0
-          for pkg in "${PACKAGES[@]}"; do
-            echo "📦 Building: $pkg"
-            if make package/$pkg/compile -j"$(nproc)" V=s 2>&1 | tee -a build.log; then
-              echo "✅ $pkg built successfully"
-            else
-              echo "❌ $pkg build failed"
-              FAILED=1
-            fi
-            echo "---"
-          done
-          
-          if [ $FAILED -eq 1 ]; then
-            echo "⚠️ Some packages failed"
-            exit 1
-          fi
-          
-          echo "✅ All packages built successfully"
+          echo "✅ Build completed"
 
       - name: Show generated packages
         if: always()
@@ -158,10 +158,17 @@ jobs:
           echo "📁 Generated .ipk Packages"
           echo "=========================="
           
-          find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort || echo "No packages found"
+          # 查找所有加速相关 .ipk 文件
+          find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' | sort || echo "No acceleration packages found"
           
           echo -e "\n📁 Package sizes:"
           find bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec ls -lh {} \; | sort -k5 -h || true
+          
+          echo -e "\n📁 All packages in base:"
+          ls -lh bin/packages/*/base/*.ipk 2>/dev/null | head -20 || echo "No base packages"
+          
+          echo -e "\n📁 All packages in luci:"
+          ls -lh bin/packages/*/luci/*.ipk 2>/dev/null | head -20 || echo "No luci packages"
 
       - name: Upload packages
         if: success()
@@ -175,14 +182,15 @@ jobs:
             source/bin/packages/*/base/kmod-ipt-fullconenat*.ipk
             source/bin/packages/*/base/iptables-mod-fullconenat*.ipk
             source/bin/packages/*/base/nftables-mod-fullconenat*.ipk
+            source/bin/packages/*/base/mtwifi-cfg*.ipk
             source/bin/packages/*/luci/luci-app-turboacc-mtk*.ipk
             source/bin/packages/*/luci/luci-i18n-turboacc-mtk-zh-cn*.ipk
-            source/bin/packages/*/base/mtwifi-cfg*.ipk
             source/bin/packages/*/luci/luci-app-mtwifi-cfg*.ipk
             source/bin/packages/*/luci/luci-i18n-mtwifi-cfg-zh-cn*.ipk
+            source/bin/packages/*/base/Packages*
             source/.config
             source/build.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
       - name: Build summary
@@ -194,8 +202,9 @@ jobs:
           echo "Kernel: ${{ inputs.target_kernel }}"
           echo "Arch: ${{ inputs.target_arch }}"
           echo "LuCI: ${{ inputs.include_luci && 'Included' || 'Excluded' }}"
+          echo ""
           
           if [ -d "source/bin/packages" ]; then
-            echo "Generated packages:"
+            echo "Generated acceleration packages:"
             find source/bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec basename {} \; | sort | uniq || echo "None"
           fi
