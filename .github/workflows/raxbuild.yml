@@ -35,9 +35,9 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Load verified NX30 Pro config
+      - name: Load verified RAX3000Me config
         run: |  
-          cp configs/nx30pro-nmbm.config .config
+          cp configs/rax3000me-accel.config .config
           make defconfig
 
       - name: Validate selected config
@@ -75,14 +75,14 @@ jobs:
         run: |
           echo "==== filogic outputs ===="
           find bin/targets/mediatek/filogic -maxdepth 1 -type f | sort || true
-          echo "==== NX30 outputs ===="
-          find bin/targets/mediatek/filogic -maxdepth 1 -type f | grep -Ei 'nx30|h3c' || true
+          echo "==== RAX3000Me outputs ===="
+          find bin/targets/mediatek/filogic -maxdepth 1 -type f | grep -Ei 'rax3000me|cmcc' || true
 
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nx30pro-output
+          name: rax3000me-output
           path: |
             bin/targets/mediatek/filogic/
             .config
