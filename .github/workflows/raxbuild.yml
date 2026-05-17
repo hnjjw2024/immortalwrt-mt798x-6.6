@@ -1,4 +1,4 @@
-name: Build NX30 Pro NMBM
+name: raxbuild
 
 on:
   workflow_dispatch:
