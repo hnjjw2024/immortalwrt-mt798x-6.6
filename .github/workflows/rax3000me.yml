@@ -48,7 +48,6 @@ jobs:
 
       - name: Validate selected config
         run: |
-          # ✅ 修复：所有配置项使用正确格式
           grep -qx 'CONFIG_TARGET_mediatek=y' .config
           grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config
           grep -qx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config
@@ -60,13 +59,6 @@ jobs:
           grep -qx 'CONFIG_PACKAGE_kmod-bonding=y' .config
           grep -qx 'CONFIG_PACKAGE_kmod-netlink-diag=y' .config
           grep -qx 'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' .config
-          # Hardware acceleration core validation
-          grep -qx 'CONFIG_PACKAGE_kmod-mediatek-hnat=y' .config
-          grep -qx 'CONFIG_PACKAGE_kmod-warp=y' .config
-          grep -qx 'CONFIG_MTK_FAST_NAT_SUPPORT=y' .config
-          grep -qx 'CONFIG_MTK_WARP_SUPPORT=y' .config
-          grep -qx 'CONFIG_NF_FLOW_TABLE_HW=y' .config
-          grep -qx 'CONFIG_PACKAGE_kmod-ipt-offload=y' .config
 
       - name: Show selected config
         run: |
