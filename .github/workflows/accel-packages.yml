@@ -98,7 +98,6 @@ jobs:
           
           # 检查核心加速包
           for pkg in \
-            "CONFIG_PACKAGE_kmod-mediatek-hnat=y" \
             "CONFIG_PACKAGE_kmod-warp=y" \
             "CONFIG_PACKAGE_kmod-ipt-offload=y" \
             "CONFIG_PACKAGE_kmod-ipt-fullconenat=y"; do
