@@ -1,12 +1,19 @@
-name: Build CMCC RAX3000Me Firmware
+# =============================================================================
+# .github/workflows/rax3000me.yml
+# Build CMCC RAX3000Me Firmware with Full Hardware Acceleration
+# Based on: nx30pro-nmbm.yml template
+# Target: immortalwrt-mt798x-6.6 @ nx30pro-nmbm-build
+# =============================================================================
+
+name: Build RAX3000Me Firmware
 
 on:
   workflow_dispatch:
     inputs:
       memory_type:
-        description: 'Memory Type (check your device!)'
+        description: 'Memory Type (CRITICAL: check your device!)'
         required: true
-        default: 'ddr3'
+        default: 'ddr4'
         type: choice
         options:
           - ddr3
@@ -19,34 +26,51 @@ on:
         options:
           - emmc
           - nand
-      with_usb:
-        description: 'Enable USB support'
+      enable_usb:
+        description: 'Enable USB support (if your device has USB port)'
         required: false
-        default: true
+        default: false
+        type: boolean
+      upload_release:
+        description: 'Upload to GitHub Release'
+        required: false
+        default: false
         type: boolean
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # 根据输入动态设置 DEVICE_PROFILE
-  DEVICE_PROFILE: ${{ format('DEVICE_cmcc_rax3000me-{0}-{1}{2}', 
-    github.event.inputs.memory_type, 
+  REPO_URL: https://github.com/hnjjw2024/immortalwrt-mt798x-6.6
+  REPO_BRANCH: nx30pro-nmbm-build
+  CONFIG_FILE: configs/rax3000me-accel.config
+  DEVICE_PROFILE: cmcc_rax3000me
+  FIRMWARE_SUFFIX: ${{ format('{0}-{1}{2}', 
     github.event.inputs.storage_type,
-    github.event.inputs.with_usb == 'false' && '-nousb' || '') }}
+    github.event.inputs.memory_type,
+    github.event.inputs.enable_usb == 'false' && '-nousb' || '') }}
 
 jobs:
   build:
+    name: Build RAX3000Me (${{ github.event.inputs.memory_type }}/${{ github.event.inputs.storage_type }})
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout source
+      # =======================================================================
+      # 1. Checkout Source
+      # =======================================================================
+      - name: Checkout source code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          ref: nx30pro-nmbm-build  # 或您需要的分支
+          ref: ${{ env.REPO_BRANCH }}
 
+      # =======================================================================
+      # 2. Install Build Dependencies (参照 nx30pro-nmbm.yml)
+      # =======================================================================
       - name: Install build dependencies
         run: |
           sudo apt update
+          sudo apt full-upgrade -y
           sudo apt install -y \
             ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
             bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
@@ -58,64 +82,195 @@ jobs:
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
             texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
 
+      # =======================================================================
+      # 3. Update Feeds
+      # =======================================================================
       - name: Update and install feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 🔹 关键 1: 使用 RAX3000Me 专用 config
-      - name: Load RAX3000Me config
+      # =======================================================================
+      # 4. Load Configuration (关键：使用专用加速配置)
+      # =======================================================================
+      - name: Load RAX3000Me config with hardware acceleration
         run: |
-          # 基础配置继承 mt7981-ax3000
-          cp defconfig/mt7981-ax3000.config .config
+          echo "🔍 Checking config file: ${{ env.CONFIG_FILE }}"
           
-          # 覆盖为 RAX3000Me 设备
-          echo 'CONFIG_TARGET_mediatek=y' >> .config
-          echo 'CONFIG_TARGET_mediatek_filogic=y' >> .config
-          echo 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' >> .config
-          echo "CONFIG_TARGET_PROFILE=\"DEVICE_cmcc_rax3000me\"" >> .config
+          if [ -f "${{ env.CONFIG_FILE }}" ]; then
+            cp "${{ env.CONFIG_FILE }}" .config
+            echo "✅ Loaded config: ${{ env.CONFIG_FILE }}"
+          else
+            echo "❌ Config file not found: ${{ env.CONFIG_FILE }}"
+            echo "💡 Please create configs/rax3000me-accel.config first"
+            exit 1
+          fi
           
-          # 根据您的硬件选择内存/存储组合 (示例: eMMC+DDR3)
-          # 实际编译时 mt7981-bl2 会自动选择对应 preloader
+          # 根据用户输入动态调整配置
+          if [ "${{ github.event.inputs.enable_usb }}" = "true" ]; then
+            echo "🔌 Enabling USB support..."
+            echo 'CONFIG_PACKAGE_kmod-usb3=y' >> .config
+            echo 'CONFIG_PACKAGE_kmod-usb-storage=y' >> .config
+            echo 'CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y' >> .config
+          fi
+          
+          # 应用配置
           make defconfig
+          echo "✅ defconfig generated successfully"
 
-      # 🔹 关键 2: 验证配置
-      - name: Validate config
+      # =======================================================================
+      # 5. Validate Hardware Acceleration Config (核心验证步骤)
+      # =======================================================================
+      - name: Validate hardware acceleration config
         run: |
-          grep -q 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config || exit 1
-          grep -q 'CONFIG_PACKAGE_kmod-mt7915e=y' .config || echo "⚠️ Wireless driver not enabled"
-          echo "✅ Config validated for cmcc_rax3000me"
+          echo "🔐 Validating critical acceleration modules..."
+          
+          # === 基础设备配置 ===
+          grep -qx 'CONFIG_TARGET_mediatek=y' .config || { echo "❌ TARGET_mediatek"; exit 1; }
+          grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config || { echo "❌ TARGET_filogic"; exit 1; }
+          grep -qx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config || { echo "❌ DEVICE_cmcc_rax3000me"; exit 1; }
+          
+          # === 无线驱动 (必须) ===
+          grep -qx 'CONFIG_MTK_WIFI_DRIVER=y' .config || { echo "❌ MTK_WIFI_DRIVER"; exit 1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-mt7915e=y' .config || { echo "❌ kmod-mt7915e"; exit 1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-mt7981-firmware=y' .config || { echo "❌ mt7981-firmware"; exit 1; }
+          
+          # === 硬件加速核心 (关键！任一缺失即失败) ===
+          grep -qx 'CONFIG_PACKAGE_kmod-mediatek_hnat=y' .config || { echo "❌ kmod-mediatek_hnat"; exit 1; }
+          grep -qx 'CONFIG_MTK_FAST_NAT_SUPPORT=y' .config || { echo "❌ MTK_FAST_NAT_SUPPORT"; exit 1; }
+          grep -qx 'CONFIG_PACKAGE_kmod-warp=y' .config || { echo "❌ kmod-warp"; exit 1; }
+          grep -qx 'CONFIG_MTK_WARP_SUPPORT=y' .config || { echo "❌ MTK_WARP_SUPPORT"; exit 1; }
+          grep -qx 'CONFIG_NF_FLOW_TABLE_HW=y' .config || echo "⚠️ NF_FLOW_TABLE_HW not set (software fallback OK)"
+          
+          # === Flow Offloading ===
+          grep -qx 'CONFIG_PACKAGE_kmod-ipt-offload=y' .config || echo "⚠️ kmod-ipt-offload not enabled"
+          
+          # === TurboACC LuCI 界面 ===
+          grep -qx 'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' .config || { echo "❌ luci-app-turboacc-mtk"; exit 1; }
+          grep -qx 'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' .config || echo "⚠️ zh-cn lang pack missing"
+          
+          # === FullCone NAT (P2P/游戏必需) ===
+          grep -qx 'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' .config || echo "⚠️ FullConeNAT not enabled"
+          
+          # === 无线管理工具 (推荐) ===
+          grep -qx 'CONFIG_PACKAGE_mtwifi-cfg=y' .config && echo "✅ mtwifi-cfg enabled" || echo "⚠️ mtwifi-cfg not enabled"
+          grep -qx 'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' .config && echo "✅ LuCI mtwifi-cfg enabled" || true
+          
+          echo "✅ All critical hardware acceleration configs validated!"
 
-      - name: Show target config
+      # =======================================================================
+      # 6. Show Config Summary
+      # =======================================================================
+      - name: Show target configuration
         run: |
-          echo "=== Device Profile ==="
-          grep -E '^CONFIG_TARGET_(DEVICE_|PROFILE)' .config
-          echo "=== Artifacts (preloader/uboot) ==="
-          grep -E 'CONFIG_PACKAGE_.*bl2|CONFIG_PACKAGE_.*bl31|CONFIG_PACKAGE_.*uboot' .config || true
+          echo "📋 === Device Profile ==="
+          grep -E '^CONFIG_TARGET_(DEVICE_|PROFILE)' .config | sort
+          
+          echo -e "\n📋 === Hardware Acceleration ==="
+          grep -E '^(CONFIG_MTK_FAST_NAT|CONFIG_MTK_WARP|CONFIG_NF_FLOW_TABLE|CONFIG_PACKAGE_kmod-(mediatek_hnat|warp|ipt-offload))' .config | sort
+          
+          echo -e "\n📋 === Wireless Driver ==="
+          grep -E '^CONFIG_(MTK_WIFI|PACKAGE_kmod-mt79)' .config | sort
+          
+          echo -e "\n📋 === TurboACC & FullCone ==="
+          grep -E '^(CONFIG_PACKAGE_luci-app-turboacc|CONFIG_PACKAGE_kmod-ipt-fullconenat)' .config | sort
 
+      # =======================================================================
+      # 7. Download Sources
+      # =======================================================================
       - name: Download sources
-        run: make download -j"$(nproc)"
+        run: |
+          echo "📦 Downloading source packages..."
+          make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
+          echo "✅ Download completed"
 
+      # =======================================================================
+      # 8. Build Firmware
+      # =======================================================================
       - name: Build firmware
         run: |
+          echo "🔨 Starting firmware compilation..."
+          echo "   Threads: $(nproc) | Memory: $(free -h | grep Mem | awk '{print $2}')"
+          
           set -o pipefail
           make -j"$(nproc)" V=s 2>&1 | tee build.log
+          
+          echo "✅ Build completed"
 
+      # =======================================================================
+      # 9. Show Generated Images
+      # =======================================================================
       - name: Show generated images
         if: always()
         run: |
-          echo "=== All filogic outputs ==="
-          find bin/targets/mediatek/filogic -type f -name "*.itb" -o -name "*.bin" 2>/dev/null | sort
-          echo "=== RAX3000Me specific ==="
-          find bin/targets/mediatek/filogic -type f | grep -i 'rax3000me' || echo "⚠️ No rax3000me files found"
+          echo "📁 === All filogic outputs ==="
+          find bin/targets/mediatek/filogic -type f \( -name "*.itb" -o -name "*.bin" \) 2>/dev/null | sort || true
+          
+          echo -e "\n📁 === RAX3000Me specific outputs ==="
+          find bin/targets/mediatek/filogic -type f | grep -i 'rax3000me' | sort || echo "⚠️ No rax3000me files found"
+          
+          echo -e "\n📁 === File sizes ==="
+          find bin/targets/mediatek/filogic -type f -name '*rax3000me*' -exec ls -lh {} \; 2>/dev/null || true
 
-      - name: Upload firmware
+      # =======================================================================
+      # 10. Upload Artifacts
+      # =======================================================================
+      - name: Upload firmware artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-rax3000me-${{ github.event.inputs.memory_type }}-${{ github.event.inputs.storage_type }}
+          name: immortalwrt-rax3000me-${{ env.FIRMWARE_SUFFIX }}
           path: |
             bin/targets/mediatek/filogic/*rax3000me*
+            bin/targets/mediatek/filogic/fitblk*.itb
             .config
             build.log
+            download.log
           if-no-files-found: warn
+          retention-days: 30
+
+      # =======================================================================
+      # 11. (Optional) Create GitHub Release
+      # =======================================================================
+      - name: Create GitHub Release
+        if: always() && github.event.inputs.upload_release == 'true' && github.ref == 'refs/heads/nx30pro-nmbm-build'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RAX3000Me ${{ env.FIRMWARE_SUFFIX }} - ${{ github.run_number }}
+          tag_name: rax3000me-${{ env.FIRMWARE_SUFFIX }}-${{ github.run_number }}
+          body: |
+            ## 📦 ImmortalWrt for CMCC RAX3000Me
+            
+            **Build Info:**
+            - Branch: `${{ env.REPO_BRANCH }}`
+            - Run: #${{ github.run_number }}
+            - Date: ${{ github.event.head_commit.timestamp }}
+            
+            **Hardware Config:**
+            - Memory: `${{ github.event.inputs.memory_type }}`
+            - Storage: `${{ github.event.inputs.storage_type }}`
+            - USB: `${{ github.event.inputs.enable_usb && 'Enabled' || 'Disabled' }}`
+            
+            **Features:**
+            - ✅ MediaTek HW NAT + WARP acceleration
+            - ✅ Flow Offloading + FullCone NAT
+            - ✅ MTK official WiFi driver + mtwifi-cfg
+            - ✅ TurboACC LuCI management interface
+            
+            ⚠️ **IMPORTANT**: Ensure your device matches the memory type (DDR3/DDR4)!
+            Flashing wrong preloader may cause boot failure.
+          files: |
+            bin/targets/mediatek/filogic/*rax3000me*.itb
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # =======================================================================
+      # 12. Cleanup (Optional)
+      # =======================================================================
+      - name: Cleanup workspace
+        if: always()
+        run: |
+          echo "🧹 Cleaning up build artifacts..."
+          rm -rf build.log download.log .config
+          echo "✅ Cleanup completed"
