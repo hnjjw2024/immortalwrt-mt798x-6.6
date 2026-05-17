@@ -1,7 +1,7 @@
 # =============================================================================
 # .github/workflows/rax3000me-build.yml
 # Build CMCC RAX3000Me Firmware
-# Strictly based on nx30pro-nmbm.yml template
+# Fixed version
 # =============================================================================
 
 name: Build CMCC RAX3000Me
@@ -48,9 +48,10 @@ jobs:
 
       - name: Validate selected config
         run: |
+          # ✅ 修复：所有配置项使用正确格式
           grep -qx 'CONFIG_TARGET_mediatek=y' .config
           grep -qx 'CONFIG_TARGET_mediatek_filogic=y' .config
-          grep -qx 'CONFIG_TARGET_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config
+          grep -qx 'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' .config
           grep -qx 'CONFIG_TARGET_PROFILE="DEVICE_cmcc_rax3000me"' .config
           grep -qx 'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' .config
           grep -qx 'CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y' .config
