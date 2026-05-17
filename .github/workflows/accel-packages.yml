@@ -31,7 +31,6 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # ✅ 关键：使用 immortalwrt-mt798x-6.6 仓库
   REPO_URL: https://github.com/hnjjw2024/immortalwrt-mt798x-6.6
   REPO_BRANCH: nx30pro-nmbm-build
   CONFIG_FILE: configs/accel-packages-only.config
@@ -43,7 +42,6 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      # ✅ 关键：直接 checkout 您的仓库（包含所有 MTK 专用包）
       - name: Checkout immortalwrt-mt798x-6.6 source
         uses: actions/checkout@v4
         with:
@@ -66,19 +64,15 @@ jobs:
             python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
             texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
 
-      # ✅ 进入源码目录
       - name: Prepare source tree
         run: |
           cd source
           echo "📂 Working directory: $(pwd)"
-          echo "📋 Files in package directory:"
           ls -la package/ | head -20
           
-          # 检查 MTK 专用包是否存在
           echo "🔍 Checking MTK packages..."
           [ -d "package/kernel/mediatek-hnat" ] && echo "✅ kmod-mediatek-hnat found" || echo "❌ kmod-mediatek-hnat not found"
           [ -d "package/kernel/warp" ] && echo "✅ kmod-warp found" || echo "❌ kmod-warp not found"
-          [ -d "package/mtk" ] && echo "✅ mtk directory found" || echo "❌ mtk directory not found"
 
       - name: Update and install feeds
         run: |
@@ -95,27 +89,8 @@ jobs:
             cp "../${{ env.CONFIG_FILE }}" .config
             echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
           else
-            echo "❌ Config not found, creating minimal config..."
-            cat > .config << 'EOF'
-CONFIG_TARGET_mediatek=y
-CONFIG_TARGET_mediatek_filogic=y
-CONFIG_LINUX_6_6=y
-CONFIG_PACKAGE_kmod-mediatek-hnat=y
-CONFIG_MTK_FAST_NAT_SUPPORT=y
-CONFIG_PACKAGE_kmod-warp=y
-CONFIG_MTK_WARP_SUPPORT=y
-CONFIG_NF_FLOW_TABLE=y
-CONFIG_NF_FLOW_TABLE_HW=y
-CONFIG_PACKAGE_kmod-ipt-offload=y
-CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-CONFIG_PACKAGE_iptables-mod-fullconenat=y
-CONFIG_PACKAGE_nftables-mod-fullconenat=y
-CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
-CONFIG_PACKAGE_mtwifi-cfg=y
-CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
-CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
-EOF
+            echo "❌ Config not found"
+            exit 1
           fi
           
           make defconfig
@@ -132,14 +107,12 @@ EOF
           cd source
           make download -j"$(nproc)" FINDS=1 2>&1 | tee download.log
 
-      # ✅ 编译单个包（而非完整固件）
       - name: Build acceleration packages
         run: |
           cd source
           echo "🔨 Building hardware acceleration packages..."
           echo "=========================================="
           
-          # 定义包列表
           PACKAGES=(
             "kmod-mediatek-hnat"
             "kmod-warp"
@@ -149,7 +122,6 @@ EOF
             "nftables-mod-fullconenat"
           )
           
-          # 添加 LuCI 包
           if [ "${{ inputs.include_luci }}" = "true" ]; then
             PACKAGES+=(
               "luci-app-turboacc-mtk"
@@ -160,7 +132,6 @@ EOF
             )
           fi
           
-          # 逐个编译
           FAILED=0
           for pkg in "${PACKAGES[@]}"; do
             echo "📦 Building: $pkg"
@@ -223,3 +194,8 @@ EOF
           echo "Kernel: ${{ inputs.target_kernel }}"
           echo "Arch: ${{ inputs.target_arch }}"
           echo "LuCI: ${{ inputs.include_luci && 'Included' || 'Excluded' }}"
+          
+          if [ -d "source/bin/packages" ]; then
+            echo "Generated packages:"
+            find source/bin/packages/ -name "*.ipk" 2>/dev/null | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi' -exec basename {} \; | sort | uniq || echo "None"
+          fi
