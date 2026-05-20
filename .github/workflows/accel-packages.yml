@@ -71,25 +71,23 @@ jobs:
         run: |
           cd source
           echo "🔧 Loading configuration..."
-          
           if [ -f "../${{ env.CONFIG_FILE }}" ]; then
             cp "../${{ env.CONFIG_FILE }}" .config
             echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
           else
             echo "❌ Config not found, creating minimal config..."
-            cat > .config << 'ENDOFCONFIG'
-            CONFIG_TARGET_mediatek=y
-            CONFIG_TARGET_mediatek_filogic=y
-            CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
-            CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y
-            CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-            CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y
-            CONFIG_PACKAGE_kmod-bonding=y
-            CONFIG_PACKAGE_kmod-netlink-diag=y
-            CONFIG_PACKAGE_kmod-ipt-fullconenat=y
-            ENDOFCONFIG
+            printf '%s\n' \
+              'CONFIG_TARGET_mediatek=y' \
+              'CONFIG_TARGET_mediatek_filogic=y' \
+              'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' \
+              'CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y' \
+              'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' \
+              'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' \
+              'CONFIG_PACKAGE_kmod-bonding=y' \
+              'CONFIG_PACKAGE_kmod-netlink-diag=y' \
+              'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' \
+              > .config
           fi
-          
           make defconfig
           echo "✅ Configuration applied"
 
