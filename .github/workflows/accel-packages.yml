@@ -81,10 +81,7 @@ jobs:
               'CONFIG_TARGET_SUBTARGET="filogic"' \
               'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' \
               'CONFIG_TARGET_DEVICE_PACKAGES_mediatek_filogic_DEVICE_cmcc_rax3000me=""' \
-              'CONFIG_PACKAGE_kmod-mediatek-hnat=y' \
-              'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' \
-              'CONFIG_PACKAGE_iptables-mod-fullconenat=y' \
-              'CONFIG_PACKAGE_nftables-mod-fullconenat=y' \
+              'CONFIG_PACKAGE_kmod-mediatek_hnat=y' \
               'CONFIG_PACKAGE_kmod-bonding=y' \
               'CONFIG_PACKAGE_kmod-netlink-diag=y' \
               'CONFIG_PACKAGE_mtwifi-cfg=y' \
@@ -146,9 +143,6 @@ jobs:
           name: accel-packages-rax3000me-ddr3-${{ inputs.target_kernel }}-${{ inputs.target_arch }}
           path: |
             source/bin/packages/aarch64_cortex-a53/base/kmod-mediatek-hnat*.ipk
-            source/bin/packages/aarch64_cortex-a53/base/kmod-ipt-fullconenat*.ipk
-            source/bin/packages/aarch64_cortex-a53/base/iptables-mod-fullconenat*.ipk
-            source/bin/packages/aarch64_cortex-a53/base/nftables-mod-fullconenat*.ipk
             source/bin/packages/aarch64_cortex-a53/base/kmod-bonding*.ipk
             source/bin/packages/aarch64_cortex-a53/base/kmod-netlink-diag*.ipk
             source/bin/packages/aarch64_cortex-a53/base/mtwifi-cfg*.ipk
