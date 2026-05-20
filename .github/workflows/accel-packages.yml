@@ -1,0 +1,179 @@
+# =============================================================================
+# .github/workflows/accel-packages.yml
+# Build Hardware Acceleration Packages (.ipk)
+# Target: CMCC RAX3000Me (MT7981, SPI-NAND, DDR3)
+# =============================================================================
+
+name: Build Hardware Acceleration Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_kernel:
+        description: 'Target Kernel Version'
+        required: true
+        default: '6.6'
+        type: choice
+        options:
+          - '6.6'
+      target_arch:
+        description: 'Target Architecture'
+        required: true
+        default: 'aarch64_cortex-a53'
+        type: choice
+        options:
+          - aarch64_cortex-a53
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  REPO_URL: https://github.com/hnjjw2024/immortalwrt-mt798x-6.6
+  REPO_BRANCH: nx30pro-nmbm-build
+  CONFIG_FILE: configs/accel-packages-only.config
+
+jobs:
+  build:
+    name: Accel Packages (${{ inputs.target_kernel }}/${{ inputs.target_arch }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: hnjjw2024/immortalwrt-mt798x-6.6
+          ref: ${{ env.REPO_BRANCH }}
+          fetch-depth: 1
+          path: source
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            gettext gcc-multilib g++-multilib git gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+            libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev libssl-dev \
+            libtool libyaml-dev libz-dev libdeflate-dev zstd liblz4-tool \
+            lld llvm lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch \
+            pkgconf python3 python3-pip python3-ply python3-docutils python3-setuptools \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+
+      - name: Update and install feeds
+        run: |
+          cd source
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load configuration
+        run: |
+          cd source
+          echo "🔧 Loading configuration..."
+          if [ -f "../${{ env.CONFIG_FILE }}" ]; then
+            cp "../${{ env.CONFIG_FILE }}" .config
+            echo "✅ Loaded: ${{ env.CONFIG_FILE }}"
+          else
+            echo "⚠️  Config file not found, generating inline config for RAX3000Me DDR3..."
+            printf '%s\n' \
+              'CONFIG_TARGET_mediatek=y' \
+              'CONFIG_TARGET_mediatek_filogic=y' \
+              'CONFIG_TARGET_SUBTARGET="filogic"' \
+              'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y' \
+              'CONFIG_TARGET_DEVICE_PACKAGES_mediatek_filogic_DEVICE_cmcc_rax3000me=""' \
+              'CONFIG_PACKAGE_kmod-mediatek-hnat=y' \
+              'CONFIG_PACKAGE_kmod-ipt-fullconenat=y' \
+              'CONFIG_PACKAGE_iptables-mod-fullconenat=y' \
+              'CONFIG_PACKAGE_nftables-mod-fullconenat=y' \
+              'CONFIG_PACKAGE_kmod-bonding=y' \
+              'CONFIG_PACKAGE_kmod-netlink-diag=y' \
+              'CONFIG_PACKAGE_mtwifi-cfg=y' \
+              'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' \
+              'CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y' \
+              'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' \
+              'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' \
+              > .config
+            echo "✅ Inline config written"
+          fi
+          make defconfig
+          echo "✅ Configuration applied"
+          echo ""
+          echo "=== 已选中的设备和包 ==="
+          grep -E '^CONFIG_TARGET_DEVICE|^CONFIG_PACKAGE' .config | grep '=y' | head -30
+
+      - name: Download sources
+        run: |
+          cd source
+          make download -j"$(nproc)" 2>&1 | tee download.log
+          find dl -size -1024c -delete 2>/dev/null || true
+
+      - name: Build firmware & packages
+        run: |
+          cd source
+          echo "🔨 Building complete firmware for RAX3000Me DDR3..."
+          echo "⏱️  Estimated time: 60-90 minutes on GitHub Actions"
+          make -j"$(nproc)" V=s 2>&1 | tee build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ $BUILD_STATUS -eq 0 ]; then
+            echo "✅ Build completed successfully!"
+          else
+            echo "❌ Build failed (exit $BUILD_STATUS). Last 50 lines of build.log:"
+            tail -50 build.log
+            exit 1
+          fi
+
+      - name: Show generated packages
+        if: always()
+        run: |
+          cd source
+          echo "📁 Generated .ipk Packages (bin/packages)"
+          echo "=========================================="
+          find bin/packages/ -name "*.ipk" 2>/dev/null \
+            | grep -E 'hnat|warp|offload|fullcone|turboacc|mtwifi|bonding' \
+            | sort || echo "No packages found in bin/packages/"
+          echo ""
+          echo "📁 Generated kmod packages (bin/targets)"
+          echo "========================================="
+          find bin/targets/ -name "kmod-*.ipk" 2>/dev/null | sort || echo "No kmod packages found in bin/targets/"
+          echo ""
+          echo "=== 验证：.config 中选中的设备 ==="
+          grep '^CONFIG_TARGET_DEVICE' .config | grep '=y' || echo "未找到设备配置"
+
+      - name: Upload packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: accel-packages-rax3000me-ddr3-${{ inputs.target_kernel }}-${{ inputs.target_arch }}
+          path: |
+            source/bin/packages/aarch64_cortex-a53/base/kmod-mediatek-hnat*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/kmod-ipt-fullconenat*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/iptables-mod-fullconenat*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/nftables-mod-fullconenat*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/kmod-bonding*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/kmod-netlink-diag*.ipk
+            source/bin/packages/aarch64_cortex-a53/base/mtwifi-cfg*.ipk
+            source/bin/packages/aarch64_cortex-a53/luci/luci-app-turboacc-mtk*.ipk
+            source/bin/packages/aarch64_cortex-a53/luci/luci-i18n-turboacc-mtk-zh-cn*.ipk
+            source/bin/packages/aarch64_cortex-a53/luci/luci-app-mtwifi-cfg*.ipk
+            source/bin/packages/aarch64_cortex-a53/luci/luci-i18n-mtwifi-cfg-zh-cn*.ipk
+            source/bin/targets/mediatek/filogic/packages/kmod-*.ipk
+            source/.config
+            source/build.log
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "📊 Build Summary"
+          echo "================"
+          echo "Device  : CMCC RAX3000Me (NAND DDR3)"
+          echo "Status  : ${{ job.status }}"
+          echo "Kernel  : ${{ inputs.target_kernel }}"
+          echo "Arch    : ${{ inputs.target_arch }}"
+          echo "Branch  : ${{ env.REPO_BRANCH }}"
+          echo ""
+          if [ -d source/bin ]; then
+            echo "=== 所有生成的 .ipk 总数 ==="
+            find source/bin -name "*.ipk" 2>/dev/null | wc -l
+          fi
