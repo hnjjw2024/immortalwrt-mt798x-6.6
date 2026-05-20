@@ -4,7 +4,7 @@
 # Target: CMCC RAX3000Me (MT7981, SPI-NAND, DDR3)
 # =============================================================================
 
-name: Build Hardware Acceleration Packages
+name: 44Build Hardware Acceleration Packages
 
 on:
   workflow_dispatch:
