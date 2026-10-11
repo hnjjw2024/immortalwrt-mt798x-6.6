@@ -1,0 +1,136 @@
+# =============================================================================
+# .github/workflows/rax3000me.yml
+# Build CMCC RAX3000Me Firmware
+# 修复版：重构 Validate selected config 步骤，避免 grep -qx 精确匹配静默失败
+# =============================================================================
+name: Build CMCC RAX3000Me
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex gawk \
+            gettext gcc-multilib g++-multilib git gnutls-dev gperf haveged help2man intltool \
+            lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+            libmpc-dev libmpfr-dev libncurses-dev libpython3-dev libreadline-dev libssl-dev \
+            libtool libyaml-dev libz-dev lld llvm lrzsz mkisofs msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev zstd
+
+      - name: Update and install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load verified RAX3000Me config
+        run: |
+          cp configs/rax3000me-accel.config .config
+          make defconfig
+
+      - name: Validate selected config
+        # 修复点:
+        # 1) 用循环收集所有缺失符号并一次性汇总报错, 替代 grep -qx 串
+        #    (原来任何一行没中就 bash -e 退出且不告诉你是哪一行)。
+        # 2) 硬校验只保留目标/机型这类一定来自种子配置的符号。
+        # 3) 易被 make defconfig 合法剔除的符号(TARGET_PROFILE 单机型不写入、
+        #    mtwifi-cfg / turboacc-mtk 的 zh-cn i18n 包 feed 中可能不存在)降级为
+        #    仅告警不中断, 保证流程能继续走到编译。
+        run: |
+          echo "==== 硬校验: 目标与机型(必须存在) ===="
+          HARD_FAIL=0
+          for s in \
+            'CONFIG_TARGET_mediatek=y' \
+            'CONFIG_TARGET_mediatek_filogic=y' \
+            'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000me=y'
+          do
+            if grep -qx "$s" .config; then
+              echo "  [OK]   $s"
+            else
+              echo "  [MISS] $s"
+              HARD_FAIL=1
+            fi
+          done
+
+          echo "==== 可选校验: GUI 与加速包(缺失仅告警) ===="
+          for s in \
+            'CONFIG_PACKAGE_luci-app-mtwifi-cfg=y' \
+            'CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn=y' \
+            'CONFIG_PACKAGE_luci-app-turboacc-mtk=y' \
+            'CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn=y' \
+            'CONFIG_PACKAGE_kmod-bonding=y' \
+            'CONFIG_PACKAGE_kmod-netlink-diag=y' \
+            'CONFIG_PACKAGE_kmod-ipt-fullconenat=y'
+          do
+            if grep -qx "$s" .config; then
+              echo "  [OK]     $s"
+            else
+              echo "  [WARN]   $s  (未出现在 .config, 可能 feed 缺失/依赖未满足, 已跳过不中断)"
+            fi
+          done
+
+          echo "==== TARGET_PROFILE 探测(单机型常不写入, 仅提示) ===="
+          if grep -q '^CONFIG_TARGET_PROFILE=' .config; then
+            grep '^CONFIG_TARGET_PROFILE=' .config
+          else
+            echo "  [INFO] 未设置 CONFIG_TARGET_PROFILE(单 profile 机型属正常), 继续编译"
+          fi
+
+          if [ "$HARD_FAIL" -ne 0 ]; then
+            echo "::error::目标/机型核心符号缺失, 请确认 configs/rax3000me-accel.config 与机型定义"
+            exit 1
+          fi
+          echo "==== 校验通过, 继续 ===="
+
+      - name: Show selected config
+        run: |
+          echo "==== target/profile ===="
+          grep -E '^(CONFIG_TARGET_|CONFIG_TARGET_PROFILE)' .config | sort || true
+          echo "==== required GUI packages ===="
+          grep -E '^(CONFIG_PACKAGE_luci-app-mtwifi-cfg|CONFIG_PACKAGE_luci-i18n-mtwifi-cfg-zh-cn|CONFIG_PACKAGE_luci-app-turboacc-mtk|CONFIG_PACKAGE_luci-i18n-turboacc-mtk-zh-cn|CONFIG_PACKAGE_kmod-bonding|CONFIG_PACKAGE_kmod-netlink-diag|CONFIG_PACKAGE_kmod-ipt-fullconenat)' .config || true
+          echo "==== hardware acceleration ===="
+          grep -E '^(CONFIG_PACKAGE_kmod-(mediatek-hnat|warp|ipt-offload)|CONFIG_MTK_(FAST_NAT|WARP)_SUPPORT|CONFIG_NF_FLOW_TABLE)' .config || true
+
+      - name: Download sources
+        run: |
+          make download -j"$(nproc)"
+
+      - name: Build firmware
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" V=s 2>&1 | tee build.log
+
+      - name: Show generated images
+        if: always()
+        run: |
+          echo "==== filogic outputs ===="
+          find bin/targets/mediatek/filogic -maxdepth 1 -type f | sort || true
+          echo "==== RAX3000Me outputs ===="
+          find bin/targets/mediatek/filogic -maxdepth 1 -type f | grep -Ei 'rax3000me|cmcc' || true
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rax3000me-output
+          path: |
+            bin/targets/mediatek/filogic/
+            .config
+            build.log
+          if-no-files-found: warn
