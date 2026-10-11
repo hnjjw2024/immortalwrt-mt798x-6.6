@@ -156,6 +156,7 @@ case "$board" in
 		[ "$PHYNBR" = "0" ] && macaddr_add $addr 2 > /sys${DEVPATH}/macaddress
 		[ "$PHYNBR" = "1" ] && macaddr_add $addr 3 > /sys${DEVPATH}/macaddress
 		;;
+	ruijie,ew-6000gx-pro*|\
 	ruijie,rg-x60*)
 		addr=$(mtd_get_mac_ascii product_info ethaddr)
 		[ "$PHYNBR" = "0" ] && macaddr_add $addr 2 > /sys${DEVPATH}/macaddress
@@ -181,6 +182,13 @@ case "$board" in
 		addr=$(mmc_get_mac_binary factory 0x04)
 		[ "$PHYNBR" = "0" ] && echo "$addr" > /sys${DEVPATH}/macaddress
 		[ "$PHYNBR" = "1" ] && macaddr_add $addr 1 > /sys${DEVPATH}/macaddress
+		;;
+	supergateway,s20l|\
+	supergateway,s20p)
+		addr0=$(mmc_get_mac_binary factory 0x4)
+		addr1=$(mmc_get_mac_binary factory 0x30)
+		[ "$PHYNBR" = "0" ] && echo "$addr0" > /sys${DEVPATH}/macaddress
+		[ "$PHYNBR" = "1" ] && echo "$addr1" > /sys${DEVPATH}/macaddress
 		;;
 	tplink,tl-xdr4288|\
 	tplink,tl-xdr6086|\

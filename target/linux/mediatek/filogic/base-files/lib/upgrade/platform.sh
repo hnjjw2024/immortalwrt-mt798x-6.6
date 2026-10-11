@@ -108,6 +108,7 @@ platform_do_upgrade() {
 	openwrt,one|\
 	netcore,n60|\
 	routerich,ax3000-ubootmod|\
+	ruijie,ew-6000gx-pro-ubootmod|\
 	ruijie,rg-x60-new-ubootmod|\
 	tplink,tl-xtr8488|\
 	tplink,wma301-ubootmod|\
@@ -119,7 +120,6 @@ platform_do_upgrade() {
 	acer,predator-w6d|\
 	acer,vero-w6m|\
 	arcadyan,mozart|\
-	clx,s20p|\
 	glinet,gl-mt2500|\
 	glinet,gl-mt6000|\
 	glinet,gl-x3000|\
@@ -139,6 +139,7 @@ platform_do_upgrade() {
 	smartrg,sdg-8632|\
 	smartrg,sdg-8733|\
 	smartrg,sdg-8733a|\
+	supergateway,s20*|\
 	huasifei,wh3000-pro|\
 	umi,uax3000e|\
  	jdcloud,re-cp-03|\
@@ -245,7 +246,6 @@ platform_copy_config() {
 	acer,predator-w6d|\
 	acer,vero-w6m|\
 	arcadyan,mozart|\
-	clx,s20p|\
 	glinet,gl-mt2500|\
 	glinet,gl-mt6000|\
 	glinet,gl-x3000|\
@@ -265,6 +265,7 @@ platform_copy_config() {
 	smartrg,sdg-8733|\
 	smartrg,sdg-8733a|\
 	smartrg,sdg-8734|\
+	supergateway,s20*|\
 	huasifei,wh3000-pro|\
 	umi,uax3000e|\
 	ubnt,unifi-6-plus)
