@@ -3,7 +3,7 @@
 # Build CMCC RAX3000Me Firmware
 # 修复版：重构 Validate selected config 步骤，避免 grep -qx 精确匹配静默失败
 # =============================================================================
-name: Build CMCC RAX3000Me
+name: 11 Build CMCC RAX3000Me
 
 on:
   workflow_dispatch:
